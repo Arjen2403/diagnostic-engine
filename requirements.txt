@@ -1,1 +1,9 @@
-
+streamlit
+pandas
+plotly
+polars
+kaleido==0.2.1
+reportlab
+sqlalchemy
+scipy
+mysql-connector-python
