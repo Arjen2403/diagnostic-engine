@@ -2,30 +2,28 @@ import pandas as pd
 
 def clean_data(df):
     """
-    Enhanced Cleaning baseline for XPDS projects.
+    Standard Cleaning baseline for XPDS projects.
     Adheres to SRS v1.4: Optimized for memory and join integrity.
     """
     initial_rows = len(df)
 
-    # 1. REQ 3.1: DateTimeID Standardization (Keep as datetime64 for calculation efficiency)
+    # 1. REQ 3.1: DateTimeID Standardization (Binary format for RAM efficiency)
     if 'DateTimeID' in df.columns:
-        # Convert to datetime object but NOT to string yet to save RAM
+        # pd.to_datetime is vectorized and memory-efficient
         df['DateTimeID'] = pd.to_datetime(df['DateTimeID'])
 
     # 2. REQ 3.1: Selective Null Removal (The Golden Thread Guard)
-    # We only drop rows if they are missing critical join keys
+    # Optimization: Only drop if critical join keys are missing
     golden_thread = ['Line', 'SectionPosition', 'GobPosition', 'Cavity']
+    critical_keys = [col for col in golden_thread if col in df.columns]
     
-    # Check which of the golden thread columns exist in this specific DF
-    existing_keys = [col for col in golden_thread if col in df.columns]
-    
-    # Also include DateTimeID in the survival check if it exists
     if 'DateTimeID' in df.columns:
-        existing_keys.append('DateTimeID')
+        critical_keys.append('DateTimeID')
         
-    df = df.dropna(subset=existing_keys)
+    # Fixed: Only drops rows missing the "Thread", preserving other sensor data
+    df = df.dropna(subset=critical_keys)
     
-    # 3. REQ: Standardize identifiers as strings for joining
+    # 3. REQ: Ensure 'Golden Thread' columns are standardized as strings
     for col in golden_thread:
         if col in df.columns:
             df[col] = df[col].astype(str)
