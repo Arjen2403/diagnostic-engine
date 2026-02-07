@@ -1,42 +1,66 @@
-import pandas as pd
-import polars as pl
-import mysql.connector
-from sqlalchemy import create_engine
+import streamlit as st
+import os
+from modules.data_ingestion import smart_loader
+from modules.data_cleaner import clean_data
 
-def ingest_from_csv(file_path: str):
-    """
-    SRS 3.1: Raw String path handling and Polars-based CSV ingestion.
-    """
-    try:
-        # Using Polars for 20M+ row speed
-        df_pl = pl.read_csv(file_path)
-        return df_pl.to_pandas()
-    except Exception as e:
-        print(f"Error loading CSV: {e}")
-        return None
+st.set_page_config(page_title="Data Ingestion", layout="wide")
 
-def ingest_from_sql(query: str, db_config: dict):
-    """
-    SRS 2.0: MySQL Data Ingestion.
-    db_config should contain: user, password, host, database
-    """
-    try:
-        # Create SQLAlchemy engine for Pandas compatibility
-        conn_str = f"mysql+mysqlconnector://{db_config['user']}:{db_config['password']}@{db_config['host']}/{db_config['database']}"
-        engine = create_engine(conn_str)
-        
-        # Stream the data to prevent memory overflow on 20M+ rows
-        df = pd.read_sql(query, engine)
-        return df
-    except Exception as e:
-        print(f"Error loading SQL: {e}")
-        return None
+st.title("📥 Data Ingestion")
+st.markdown("---")
 
-def smart_loader(source_type, path_or_query, db_config=None):
-    """
-    Unified entry point for the Ingestion Page.
-    """
-    if source_type == "CSV":
-        return ingest_from_csv(path_or_query)
-    elif source_type == "SQL":
-        return ingest_from_sql(path_or_query, db_config)
+# 1. Source Selection Toggle
+source_mode = st.radio("Select Data Source", ["Local CSV", "SQL Database (MySQL)"], horizontal=True)
+
+# 2. Input Logic based on selection
+if source_mode == "Local CSV":
+    st.info("Ensure paths are entered as Raw Strings or use the file uploader for local testing.")
+    
+    # Dual approach: Path input for 20M+ rows (Spyder style) or Upload for smaller files
+    input_method = st.selectbox("Input Method", ["File Uploader", "Direct File Path (Local)"])
+    
+    if input_method == "Direct File Path (Local)":
+        raw_path = st.text_input("Enter Raw File Path:", placeholder=r"C:\Data\Production_Data.csv")
+        if st.button("Load from Path"):
+            with st.spinner("Processing High-Volume CSV..."):
+                df = smart_loader("CSV", raw_path)
+                if df is not None:
+                    st.session_state['raw_data'], loss = clean_data(df)
+                    st.success(f"Loaded successfully. Rows removed during cleaning: {loss}")
+    else:
+        uploaded_file = st.file_uploader("Upload CSV", type="csv")
+        if uploaded_file:
+            df = smart_loader("CSV", uploaded_file)
+            st.session_state['raw_data'], loss = clean_data(df)
+            st.success(f"File uploaded. Rows removed: {loss}")
+
+elif source_mode == "SQL Database (MySQL)":
+    st.warning("SQL Connection Mode: Currently in Beta. Ensure VPN/Firewall access is active.")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        host = st.text_input("Host Address", value="localhost")
+        user = st.text_input("Username")
+    with col2:
+        database = st.text_input("Database Name")
+        password = st.text_input("Password", type="password")
+    
+    query = st.text_area("SQL Query", placeholder="SELECT * FROM machine_data WHERE Line = 'A1'")
+    
+    if st.button("Execute Query"):
+        db_config = {"host": host, "user": user, "password": password, "database": database}
+        with st.spinner("Querying MySQL..."):
+            df = smart_loader("SQL", query, db_config)
+            if df is not None:
+                st.session_state['raw_data'], loss = clean_data(df)
+                st.success(f"Query successful. Rows removed: {loss}")
+
+# 3. Data Preview & Metadata (SRS Section 5 Audit)
+if 'raw_data' in st.session_state:
+    st.markdown("---")
+    st.subheader("Data Preview (The Golden Thread)")
+    st.dataframe(st.session_state['raw_data'].head(100))
+    
+    st.metric("Total Active Rows", len(st.session_state['raw_data']))
+    
+    if st.button("Proceed to Diagnostics 🔗"):
+        st.switch_page("pages/05_Diagnostics.py")
