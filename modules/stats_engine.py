@@ -1,51 +1,27 @@
 import pandas as pd
-import numpy as np
 
-def apply_z_score(df, columns):
+def find_best_lag(df_cause, df_effect, column_cause, column_effect, max_lag_min=15):
     """
-    SRS 3.2: Z-Score Normalization.
-    Allows direct comparison of different units (e.g., Celsius vs. Reject Count).
-    Formula: z = (x - μ) / σ
+    SRS 3.2: Automated Cause-and-Effect Discovery.
+    Tests various time-lags to find where the correlation is strongest.
     """
-    df_z = df.copy()
-    for col in columns:
-        if col in df.columns:
-            mu = df[col].mean()
-            sigma = df[col].std()
-            # Prevent division by zero if std is 0
-            if sigma > 0:
-                df_z[f'z_{col}'] = (df[col] - mu) / sigma
-            else:
-                df_z[f'z_{col}'] = 0.0
-    return df_z
-
-def shift_cause_data(df, minutes_lag, timestamp_col='DateTimeID'):
-    """
-    SRS 3.2: Time-Lag Correlation Engine.
-    Shifts the 'Cause' dataset forward in time to align with 'Effect'.
-    """
-    # Ensure datetime format for calculation
-    df[timestamp_col] = pd.to_datetime(df[timestamp_col])
+    lags = []
+    correlations = []
     
-    # Calculate the offset
-    # Positive lag means the cause happened X minutes BEFORE the effect
-    df_shifted = df.copy()
-    df_shifted[timestamp_col] = df_shifted[timestamp_col] + pd.Timedelta(minutes=minutes_lag)
+    # 1. Ensure we are looking at 'Drift' (Moving Averages)
+    cause_series = df_cause[column_cause].rolling(window='1min').mean()
+    effect_series = df_effect[column_effect].rolling(window='1min').mean()
     
-    return df_shifted
-
-def calculate_cpk(df, column, lsl, usl):
-    """
-    SRS 3.3: Statistical Benchmarking.
-    Calculates Process Capability (Cpk).
-    """
-    mean = df[column].mean()
-    sigma = df[column].std()
-    
-    if sigma == 0:
-        return 0
-        
-    cpu = (usl - mean) / (3 * sigma)
-    cpl = (mean - lsl) / (3 * sigma)
-    
-    return min(cpu, cpl)
+    # 2. Iteratively shift and test correlation
+    for lag in range(max_lag_min + 1):
+        shifted_cause = cause_series.shift(lag, freq='min')
+        # Re-aligning the data for comparison
+        combined = pd.concat([shifted_cause, effect_series], axis=1).dropna()
+        if not combined.empty:
+            corr = combined.corr().iloc[0, 1]
+            lags.append(lag)
+            correlations.append(corr)
+            
+    # Find the lag with the highest absolute correlation
+    best_lag = lags[correlations.index(max(correlations, key=abs))]
+    return best_lag, max(correlations)
