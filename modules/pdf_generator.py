@@ -4,10 +4,10 @@ from reportlab.pdfgen import canvas
 from datetime import datetime
 import os
 
-def generate_diagnostic_report(filename, user_id, machine_id, plot_image_path):
+def generate_diagnostic_report(filename, user_id, machine_id, plot_image_path, notes="No remarks provided."):
     """
     SRS Section 5: Automated PDF Generation.
-    Includes metadata (Timestamp, Machine ID, and User) for audit trails.
+    Includes metadata and Analyst Remarks for a complete audit trail.
     """
     c = canvas.Canvas(filename, pagesize=A4)
     width, height = A4
@@ -23,15 +23,23 @@ def generate_diagnostic_report(filename, user_id, machine_id, plot_image_path):
     
     c.line(50, height - 110, width - 50, height - 110)
 
-    # 2. Embed Diagnostic Plot (Snapshot)
-    if os.path.exists(plot_image_path):
-        c.drawString(50, height - 130, "Correlation Analysis Snapshot:")
-        # Positioning the image (x, y, width, height)
-        c.drawImage(plot_image_path, 50, height - 450, width=500, preserveAspectRatio=True)
-    else:
-        c.drawString(50, height - 130, "[Error: Plot image not found for export]")
+    # 2. Analyst Remarks (New Section)
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(50, height - 130, "Analysis Remarks:")
+    c.setFont("Helvetica", 10)
+    # Simple line break logic for notes
+    c.drawString(50, height - 145, f"{notes[:100]}") # Truncated for layout safety
 
-    # 3. Footer / XPDS Standard
+    # 3. Embed Diagnostic Plot (Snapshot)
+    if os.path.exists(plot_image_path):
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(50, height - 175, "Correlation Analysis Snapshot:")
+        # Repositioned image slightly lower to allow for notes
+        c.drawImage(plot_image_path, 50, height - 550, width=500, preserveAspectRatio=True)
+    else:
+        c.drawString(50, height - 175, "[Error: Plot image not found for export]")
+
+    # 4. Footer / XPDS Standard
     c.setFont("Helvetica-Oblique", 8)
     c.drawString(50, 30, "Confidential - XPDS Diagnostic Engine Baseline v1.4")
     
