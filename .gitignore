@@ -1,0 +1,30 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Sat Feb  7 15:36:48 2026
+
+@author: Gebruiker
+"""
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Spyder project settings and temporary files
+.spyderproject/
+.spydata/
+.temp.py
+
+# Local environment and data files (prevents pushing 20M+ row test files)
+*.csv
+*.xlsx
+.env
+venv/
+env/
+
+# Streamlit temporary files
+.streamlit/config.toml
