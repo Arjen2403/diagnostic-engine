@@ -1,75 +1,140 @@
 import streamlit as st
+import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
-from modules.stats_engine import calculate_moving_average, calculate_cpk
+import numpy as np
 
-st.set_page_config(layout="wide", page_title="Visualization | TIP")
+# Set page configuration
+st.set_page_config(layout="wide", page_title="TIP | Universal Diagnostic Engine")
 
-st.title("📈 Data Visualization")
-st.markdown("### Single-Dataset Deep Dive & Statistical Benchmarking")
+st.title("🎯 Universal Diagnostic Engine")
+st.markdown("### Performance Monitoring & Dataset Inspection")
 
-if 'raw_data' not in st.session_state:
-    st.warning("No data found. Please go to the 📥 Ingestion page first.")
+# --- 1. MULTI-DATASET LOADING LOGIC ---
+if 'datasets' not in st.session_state:
+    st.session_state['datasets'] = {}
+
+# Ingestion Section (If no data exists yet)
+if not st.session_state['datasets']:
+    st.info("👋 No data found. Please upload a dataset to begin.")
+    uploaded_file = st.file_uploader("Upload CSV (Intensity, Loading, etc.)", type="csv")
+    if uploaded_file:
+        file_label = st.text_input("Label this dataset (e.g., 'Intensity' or 'Loading')", value="MainData")
+        if st.button("Initialize Dataset"):
+            df_new = pd.read_csv(uploaded_file)
+            df_new['DateTimeID'] = pd.to_datetime(df_new['DateTimeID'])
+            st.session_state['datasets'][file_label] = df_new
+            st.rerun()
     st.stop()
 
-df = st.session_state['raw_data']
+# --- 2. DATASET SELECTOR ---
+# This allows the user to switch between loaded files (Intensity vs Loading)
+all_loaded = list(st.session_state['datasets'].keys())
+active_label = st.selectbox("📁 Select Dataset to Visualize", all_loaded)
+df = st.session_state['datasets'][active_label]
 
-# 1. Sidebar Configuration
+# --- 3. SIDEBAR FILTERS ---
 with st.sidebar:
-    st.header("Visualization Settings")
-    target_col = st.selectbox("Select Variable to Analyze", df.columns)
+    st.header(f"🔍 Filtering: {active_label}")
+    
+    # Standard TIP Hierarchy
+    all_lines = sorted(df['Line'].unique())
+    selected_lines = st.multiselect("1. Select Line(s)", options=all_lines, default=all_lines[:1])
+    
+    if not selected_lines:
+        st.stop()
+
+    temp_df = df[df['Line'].isin(selected_lines)]
+    selected_secs = st.multiselect("2. Select Section(s) [Optional]", options=sorted(temp_df['SectionPosition'].unique()))
+    
+    if selected_secs:
+        temp_df = temp_df[temp_df['SectionPosition'].isin(selected_secs)]
+    
+    selected_cavs = st.multiselect("3. Select Cavity/Cavities [Optional]", options=sorted(temp_df['Cavity'].unique()))
+
+    st.divider()
+    
+    # 4. Dynamic Variable Selector
+    # Exclude metadata to show only the measurements
+    meta_cols = ['DateTimeID', 'Line', 'SectionPosition', 'GobPosition', 'Cavity', 'NumberOfMeasurements']
+    value_options = [c for c in df.columns if c not in meta_cols and "_xsq" not in c and "Setpoint" not in c]
+    selected_vars = st.multiselect("Select Variable(s) to Analyze", options=value_options)
     
     st.divider()
-    st.subheader("Process Capability (Cpk)")
-    enable_cpk = st.checkbox("Calculate Cpk")
-    lsl, usl = None, None
-    if enable_cpk:
-        lsl = st.number_input("Lower Specification Limit (LSL)", value=df[target_col].min())
-        usl = st.number_input("Upper Specification Limit (USL)", value=df[target_col].max())
+    alarm_limit = st.slider("Critical Deviation Limit (%)", 1.0, 10.0, 5.0)
 
-# 2. Statistics Row
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Mean", round(df[target_col].mean(), 2))
-col2.metric("Std Dev", round(df[target_col].std(), 2))
-col3.metric("Min / Max", f"{round(df[target_col].min(), 1)} / {round(df[target_col].max(), 1)}")
+# --- FILTERING EXECUTION ---
+filtered_df = df[df['Line'].isin(selected_lines)].copy()
+if selected_secs: filtered_df = filtered_df[filtered_df['SectionPosition'].isin(selected_secs)]
+if selected_cavs: filtered_df = filtered_df[filtered_df['Cavity'].isin(selected_cavs)]
 
-if enable_cpk:
-    cpk_val = calculate_cpk(df, target_col, lsl, usl)
-    # Color coding the metric for better visibility
-    delta_color = "normal" if cpk_val >= 1.33 else "inverse"
-    col4.metric("Process Capability (Cpk)", round(cpk_val, 2), delta="Target > 1.33", delta_color=delta_color)
-
-# 3. Main Time-Series Plot
-st.subheader(f"Timeline: {target_col}")
-
-smooth_data = st.checkbox("Apply Moving Average (Smoothing)")
-if smooth_data:
-    window = st.text_input("Window Size (e.g., 5min, 100)", value="5min")
-    try:
-        df_plot = calculate_moving_average(df, target_col, window)
-        plot_col = f'smooth_{target_col}'
-    except:
-        st.error("Invalid Window Format. Reverting to raw data.")
-        df_plot, plot_col = df, target_col
+if not selected_vars:
+    st.info("👈 Please select variables in the sidebar to generate graphs.")
 else:
-    df_plot, plot_col = df, target_col
+    # --- SECTION 1: NORMALIZED DEVIATION ---
+    st.subheader("📈 Normalized Deviation Tracking (%)")
+    
+    dev_cols = []
+    for var in selected_vars:
+        # Handling the Intensity naming convention vs Standard naming
+        if "IntensityZone" in var:
+            sp_col = var.replace('IntensityZone', 'IntensitySetpointZone')
+        else:
+            sp_col = var.replace('_avg', 'Setpoint_avg')
+            
+        if sp_col in filtered_df.columns:
+            dev_name = f"{var} Dev%"
+            filtered_df[dev_name] = ((filtered_df[var] - filtered_df[sp_col]) / filtered_df[sp_col]) * 100
+            dev_cols.append(dev_name)
 
-fig = px.line(df_plot, x='DateTimeID', y=plot_col, 
-              template="plotly_dark",
-              color_discrete_sequence=['#00d4ff'])
+    if dev_cols:
+        plot_dev_df = filtered_df.melt(id_vars=['DateTimeID', 'Cavity'], value_vars=dev_cols)
+        fig_dev = px.line(plot_dev_df, x='DateTimeID', y='value', color='Cavity', line_dash='variable',
+                          title=f"Deviation Analysis: {active_label}", template="plotly_dark")
+        fig_dev.add_hline(y=alarm_limit, line_dash="dash", line_color="red")
+        fig_dev.add_hline(y=-alarm_limit, line_dash="dash", line_color="red")
+        fig_dev.add_hline(y=0, line_color="white", line_width=2)
+        st.plotly_chart(fig_dev, use_container_width=True)
+        
+        st.info(f"**📊 Logic: Normalized Deviation ({active_label})**\n"
+                f"Calculated as: $((Measured - Setpoint) / Setpoint) \\times 100$.\n"
+                f"This removes spatial bias (like conveyor cooling) and highlights true process anomalies.")
+    else:
+        st.warning(f"No Setpoints found in '{active_label}'. Deviation tracking is unavailable.")
 
-# Add LSL/USL lines if Cpk is enabled
-if enable_cpk:
-    fig.add_hline(y=lsl, line_dash="dash", line_color="red", annotation_text="LSL")
-    fig.add_hline(y=usl, line_dash="dash", line_color="red", annotation_text="USL")
+    st.divider()
 
-fig.update_layout(hovermode="x unified")
-st.plotly_chart(fig, use_container_width=True)
+    # --- SECTION 2: ACTUAL VALUES ---
+    st.subheader(f"🔥 Actual {active_label} Trends")
+    plot_actual_df = filtered_df.melt(id_vars=['DateTimeID', 'Cavity'], value_vars=selected_vars)
+    fig_actual = px.line(plot_actual_df, x='DateTimeID', y='value', color='Cavity', line_dash='variable',
+                         title=f"Raw Measurements: {active_label}", template="plotly_dark")
+    st.plotly_chart(fig_actual, use_container_width=True)
+    
+    st.info(f"**📊 Logic: Actual Values**\n"
+            f"Shows the direct raw measurements for the selected {active_label} variables.")
 
-# 4. Distribution Analysis
-st.subheader("Distribution Analysis")
-hist_fig = px.histogram(df, x=target_col, nbins=50, 
-                        marginal="box", 
-                        template="plotly_dark",
-                        color_discrete_sequence=['#ffaa00'])
-st.plotly_chart(hist_fig, use_container_width=True)
+    st.divider()
+
+    # --- SECTION 3: BASELINE DRIFT ---
+    st.subheader("📉 Adaptive Baseline Drift Monitor")
+    drift_scope = st.radio("Baseline Scope:", ["Machine Total", "By Section", "By Cavity"], horizontal=True)
+    
+    drift_vars = [v.replace('IntensityZone', 'IntensitySetpointZone').replace('_avg', 'Setpoint_avg') for v in selected_vars]
+    valid_drift = [v for v in drift_vars if v in filtered_df.columns]
+
+    if valid_drift:
+        group_cols = ['DateTimeID']
+        if drift_scope == "By Section": group_cols.append('SectionPosition')
+        elif drift_scope == "By Cavity": group_cols.append('Cavity')
+
+        drift_data = filtered_df.groupby(group_cols)[valid_drift].mean().reset_index()
+        drift_plot_df = drift_data.melt(id_vars=group_cols, value_vars=valid_drift)
+
+        fig_drift = px.line(drift_plot_df, x='DateTimeID', y='value', 
+                            color='SectionPosition' if drift_scope == "By Section" else ('Cavity' if drift_scope == "By Cavity" else 'variable'),
+                            line_dash='variable' if drift_scope != "Machine Total" else None,
+                            title="Reference Standard Drift Trend", template="plotly_dark")
+        st.plotly_chart(fig_drift, use_container_width=True)
+        
+        st.info("**📊 Logic: Baseline Drift**\n"
+                "Tracks the average of the Setpoints. If this trends up or down, the whole machine is shifting.")

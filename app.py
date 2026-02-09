@@ -1,7 +1,7 @@
 import streamlit as st
 from auth import login_page
 
-# 1. Global Page Settings (Must be the first Streamlit command)
+# 1. Global Page Settings
 st.set_page_config(page_title="XPDS Diagnostic Engine", layout="wide", page_icon="📊")
 
 # 2. Session State for Authentication
@@ -15,13 +15,12 @@ if not st.session_state.authenticated:
         <style>
             [data-testid="stSidebarNav"] {display: none;}
         </style>
-    """, unsafe_content_allowed=True)
+    """, unsafe_allow_html=True)
     login_page()
 else:
     # 4. Authenticated Landing Page
     st.title("📊 Diagnostic Engine Dashboard")
     
-    # Welcome Section
     col1, col2 = st.columns([2, 1])
     
     with col1:
